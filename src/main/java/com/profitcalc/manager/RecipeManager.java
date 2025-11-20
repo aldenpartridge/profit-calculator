@@ -91,11 +91,11 @@ public class RecipeManager {
                     if (optionalIngredient.isPresent()) {
                         Ingredient ingredient = optionalIngredient.get();
                         if (!ingredient.isEmpty()) {
-                            // Get matching items - need to use getMatchingItems() or similar
-                            for (ItemStack stack : ingredient.getMatchingStacks()) {
-                                Item item = stack.getItem();
+                            // Use reflection to get matching stacks
+                            ItemStack[] stacks = getMatchingStacksReflection(ingredient);
+                            if (stacks != null && stacks.length > 0) {
+                                Item item = stacks[0].getItem();
                                 ingredientCounts.merge(item, 1, Integer::sum);
-                                break; // Just use first matching item
                             }
                         }
                     }
@@ -106,13 +106,14 @@ public class RecipeManager {
             } else if (recipe instanceof ShapelessRecipe shapelessRecipe) {
                 Map<Item, Integer> ingredientCounts = new HashMap<>();
 
-                // getInput() returns list of ingredients
-                for (Ingredient ingredient : shapelessRecipe.getInput()) {
+                // Use reflection to get ingredients
+                List<Ingredient> ingredients = getIngredientsReflection(shapelessRecipe);
+                for (Ingredient ingredient : ingredients) {
                     if (!ingredient.isEmpty()) {
-                        for (ItemStack stack : ingredient.getMatchingStacks()) {
-                            Item item = stack.getItem();
+                        ItemStack[] stacks = getMatchingStacksReflection(ingredient);
+                        if (stacks != null && stacks.length > 0) {
+                            Item item = stacks[0].getItem();
                             ingredientCounts.merge(item, 1, Integer::sum);
-                            break; // Just use first matching item
                         }
                     }
                 }
@@ -138,12 +139,12 @@ public class RecipeManager {
 
             CraftingRecipe customRecipe = new CraftingRecipe(output.getItem(), output.getCount());
 
-            // Get ingredient - getInput() returns the ingredient
-            Ingredient ingredient = recipe.getInput();
-            if (!ingredient.isEmpty()) {
-                for (ItemStack stack : ingredient.getMatchingStacks()) {
-                    customRecipe.addIngredient(stack.getItem(), 1);
-                    break; // Just use first matching item
+            // Get ingredient using reflection
+            Ingredient ingredient = getIngredientReflection(recipe);
+            if (ingredient != null && !ingredient.isEmpty()) {
+                ItemStack[] stacks = getMatchingStacksReflection(ingredient);
+                if (stacks != null && stacks.length > 0) {
+                    customRecipe.addIngredient(stacks[0].getItem(), 1);
                 }
             }
 
@@ -153,6 +154,79 @@ public class RecipeManager {
             LOGGER.warn("Failed to convert smelting recipe: {}", e.getMessage());
             return null;
         }
+    }
+
+    // Helper method to get matching stacks using reflection
+    private ItemStack[] getMatchingStacksReflection(Ingredient ingredient) {
+        try {
+            // Try getMatchingStacks() first
+            try {
+                var method = Ingredient.class.getMethod("getMatchingStacks");
+                return (ItemStack[]) method.invoke(ingredient);
+            } catch (NoSuchMethodException e) {
+                // Try accessing the field directly
+                Field matchingStacksField = Ingredient.class.getDeclaredField("matchingStacks");
+                matchingStacksField.setAccessible(true);
+                return (ItemStack[]) matchingStacksField.get(ingredient);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to get matching stacks: {}", e.getMessage());
+            return new ItemStack[0];
+        }
+    }
+
+    // Helper method to get ingredients from ShapelessRecipe using reflection
+    @SuppressWarnings("unchecked")
+    private List<Ingredient> getIngredientsReflection(ShapelessRecipe recipe) {
+        try {
+            // Try getInput() first
+            try {
+                var method = ShapelessRecipe.class.getMethod("getInput");
+                return (List<Ingredient>) method.invoke(recipe);
+            } catch (NoSuchMethodException e) {
+                // Try getIngredients()
+                try {
+                    var method = ShapelessRecipe.class.getMethod("getIngredients");
+                    return (List<Ingredient>) method.invoke(recipe);
+                } catch (NoSuchMethodException e2) {
+                    // Try accessing field directly
+                    Field inputField = ShapelessRecipe.class.getDeclaredField("input");
+                    inputField.setAccessible(true);
+                    return (List<Ingredient>) inputField.get(recipe);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to get ingredients from shapeless recipe: {}", e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    // Helper method to get ingredient from SmeltingRecipe using reflection
+    private Ingredient getIngredientReflection(SmeltingRecipe recipe) {
+        try {
+            // Try getInput() first
+            try {
+                var method = SmeltingRecipe.class.getMethod("getInput");
+                return (Ingredient) method.invoke(recipe);
+            } catch (NoSuchMethodException e) {
+                // Try getIngredients()
+                try {
+                    var method = SmeltingRecipe.class.getMethod("getIngredients");
+                    List<?> ingredients = (List<?>) method.invoke(recipe);
+                    if (!ingredients.isEmpty()) {
+                        return (Ingredient) ingredients.get(0);
+                    }
+                } catch (NoSuchMethodException e2) {
+                    // Try accessing field directly
+                    Field inputField = SmeltingRecipe.class.getDeclaredField("input");
+                    inputField.setAccessible(true);
+                    return (Ingredient) inputField.get(recipe);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to get ingredient from smelting recipe: {}", e.getMessage());
+        }
+        return null;
     }
 
     public Optional<CraftingRecipe> getCheapestRecipe(Item item, Map<Item, Double> prices) {
