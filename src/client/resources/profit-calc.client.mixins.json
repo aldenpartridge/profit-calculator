@@ -3,7 +3,6 @@
 	"package": "com.profitcalc.mixin.client",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"ExampleClientMixin",
 		"ChatMessageMixin",
 		"ClientPlayNetworkHandlerMixin"
 	],
