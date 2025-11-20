@@ -18,7 +18,7 @@ public class ProfitCalcClient implements ClientModInitializer {
 			"key.profit-calc.open_gui",
 			InputUtil.Type.KEYSYM,
 			GLFW.GLFW_KEY_P,
-			KeyBinding.MISC_CATEGORY
+			"key.categories.misc"
 		));
 
 		// Register tick event to check for key presses
