@@ -1,5 +1,6 @@
 package com.profitcalc.manager;
 
+import com.profitcalc.mixin.client.RecipeManagerAccessor;
 import com.profitcalc.model.CraftingRecipe;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -28,26 +29,42 @@ public class RecipeManager {
         recipesByOutput.clear();
         int count = 0;
 
-        // Load crafting recipes
-        for (RecipeEntry<net.minecraft.recipe.CraftingRecipe> entry :
-             minecraftRecipeManager.listAllOfType(net.minecraft.recipe.RecipeType.CRAFTING)) {
-            CraftingRecipe customRecipe = convertCraftingRecipe(entry.value());
-            if (customRecipe != null) {
-                Item output = customRecipe.getOutput();
-                recipesByOutput.computeIfAbsent(output, k -> new ArrayList<>()).add(customRecipe);
-                count++;
-            }
-        }
+        // Access recipes through our mixin accessor
+        try {
+            RecipeManagerAccessor accessor = (RecipeManagerAccessor) minecraftRecipeManager;
+            Map<RecipeType<?>, Map<?, RecipeEntry<?>>> allRecipes = accessor.getRecipes();
 
-        // Load smelting recipes
-        for (RecipeEntry<SmeltingRecipe> entry :
-             minecraftRecipeManager.listAllOfType(net.minecraft.recipe.RecipeType.SMELTING)) {
-            CraftingRecipe customRecipe = convertSmeltingRecipe(entry.value());
-            if (customRecipe != null) {
-                Item output = customRecipe.getOutput();
-                recipesByOutput.computeIfAbsent(output, k -> new ArrayList<>()).add(customRecipe);
-                count++;
+            // Load crafting recipes
+            Map<?, RecipeEntry<?>> craftingRecipes = allRecipes.get(net.minecraft.recipe.RecipeType.CRAFTING);
+            if (craftingRecipes != null) {
+                for (RecipeEntry<?> entry : craftingRecipes.values()) {
+                    if (entry.value() instanceof net.minecraft.recipe.CraftingRecipe craftingRecipe) {
+                        CraftingRecipe customRecipe = convertCraftingRecipe(craftingRecipe);
+                        if (customRecipe != null) {
+                            Item output = customRecipe.getOutput();
+                            recipesByOutput.computeIfAbsent(output, k -> new ArrayList<>()).add(customRecipe);
+                            count++;
+                        }
+                    }
+                }
             }
+
+            // Load smelting recipes
+            Map<?, RecipeEntry<?>> smeltingRecipes = allRecipes.get(net.minecraft.recipe.RecipeType.SMELTING);
+            if (smeltingRecipes != null) {
+                for (RecipeEntry<?> entry : smeltingRecipes.values()) {
+                    if (entry.value() instanceof SmeltingRecipe smeltingRecipe) {
+                        CraftingRecipe customRecipe = convertSmeltingRecipe(smeltingRecipe);
+                        if (customRecipe != null) {
+                            Item output = customRecipe.getOutput();
+                            recipesByOutput.computeIfAbsent(output, k -> new ArrayList<>()).add(customRecipe);
+                            count++;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.error("Failed to load recipes: {}", e.getMessage(), e);
         }
 
         LOGGER.info("Loaded {} recipes", count);

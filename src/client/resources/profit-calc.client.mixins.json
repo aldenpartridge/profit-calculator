@@ -5,7 +5,8 @@
 	"client": [
 		"ExampleClientMixin",
 		"ChatMessageMixin",
-		"ClientPlayNetworkHandlerMixin"
+		"ClientPlayNetworkHandlerMixin",
+		"RecipeManagerAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1
