@@ -1,6 +1,9 @@
 package com.profitcalc.gui;
 
+import com.profitcalc.api.DonutSMPApiClient;
 import com.profitcalc.calculator.ProfitCalculator;
+import com.profitcalc.config.ConfigManager;
+import com.profitcalc.manager.AuctionHouseManager;
 import com.profitcalc.model.ProfitCalculation;
 import com.profitcalc.model.RecipeIngredient;
 import net.minecraft.client.MinecraftClient;
@@ -16,9 +19,14 @@ import java.util.List;
 public class ProfitCalculatorScreen extends Screen {
     private final Screen parent;
     private TextFieldWidget budgetField;
+    private TextFieldWidget apiKeyField;
+    private ButtonWidget refreshButton;
+    private ButtonWidget calculateButton;
     private List<ProfitCalculation> profitableItems = new ArrayList<>();
     private int scrollOffset = 0;
     private int selectedIndex = -1;
+    private String statusMessage = "";
+    private int statusColor = 0xFFFFFF;
 
     private static final int ITEM_HEIGHT = 20;
     private static final int LIST_WIDTH = 250;
@@ -33,11 +41,41 @@ public class ProfitCalculatorScreen extends Screen {
     protected void init() {
         super.init();
 
+        // API Key field
+        apiKeyField = new TextFieldWidget(
+            this.textRenderer,
+            10,
+            25,
+            200,
+            20,
+            Text.literal("API Key")
+        );
+        apiKeyField.setMaxLength(100);
+        String currentKey = ConfigManager.getInstance().getApiKey();
+        if (currentKey != null && !currentKey.isEmpty()) {
+            apiKeyField.setText(currentKey);
+        }
+        apiKeyField.setPlaceholder(Text.literal("Enter API key..."));
+        this.addDrawableChild(apiKeyField);
+
+        // Save API Key button
+        this.addDrawableChild(ButtonWidget.builder(
+            Text.literal("Save Key"),
+            button -> saveApiKey()
+        ).dimensions(215, 25, 80, 20).build());
+
+        // Refresh button
+        refreshButton = ButtonWidget.builder(
+            Text.literal("Refresh Auction Data"),
+            button -> refreshAuctionData()
+        ).dimensions(300, 25, 150, 20).build();
+        this.addDrawableChild(refreshButton);
+
         // Budget input field
         budgetField = new TextFieldWidget(
             this.textRenderer,
             this.width / 2 - 100,
-            20,
+            55,
             200,
             20,
             Text.literal("Budget")
@@ -48,16 +86,73 @@ public class ProfitCalculatorScreen extends Screen {
         this.addDrawableChild(budgetField);
 
         // Calculate button
-        this.addDrawableChild(ButtonWidget.builder(
+        calculateButton = ButtonWidget.builder(
             Text.literal("Calculate Profits"),
             button -> calculateProfits()
-        ).dimensions(this.width / 2 - 100, 45, 200, 20).build());
+        ).dimensions(this.width / 2 - 100, 80, 200, 20).build();
+        this.addDrawableChild(calculateButton);
 
         // Close button
         this.addDrawableChild(ButtonWidget.builder(
             Text.literal("Close"),
             button -> this.close()
         ).dimensions(this.width / 2 - 100, this.height - 30, 200, 20).build());
+
+        updateStatus();
+    }
+
+    private void saveApiKey() {
+        String apiKey = apiKeyField.getText().trim();
+        if (apiKey.isEmpty()) {
+            statusMessage = "API key cannot be empty!";
+            statusColor = 0xFF0000;
+            return;
+        }
+
+        statusMessage = "Validating API key...";
+        statusColor = 0xFFFF00;
+
+        DonutSMPApiClient.getInstance().testApiKey(apiKey).thenAccept(valid -> {
+            if (valid) {
+                ConfigManager.getInstance().setApiKey(apiKey);
+                statusMessage = "API key saved successfully!";
+                statusColor = 0x00FF00;
+            } else {
+                statusMessage = "Invalid API key! Generate one with /api in-game";
+                statusColor = 0xFF0000;
+            }
+        });
+    }
+
+    private void refreshAuctionData() {
+        String apiKey = ConfigManager.getInstance().getApiKey();
+        if (apiKey == null || apiKey.isEmpty()) {
+            statusMessage = "No API key set! Save your key first.";
+            statusColor = 0xFF0000;
+            return;
+        }
+
+        if (AuctionHouseManager.getInstance().isRefreshing()) {
+            statusMessage = "Already refreshing...";
+            statusColor = 0xFFFF00;
+            return;
+        }
+
+        refreshButton.active = false;
+        statusMessage = "Refreshing auction data...";
+        statusColor = 0xFFFF00;
+
+        AuctionHouseManager.getInstance().refreshFromApi().thenAccept(success -> {
+            refreshButton.active = true;
+            if (success) {
+                int count = AuctionHouseManager.getInstance().getTotalItems();
+                statusMessage = String.format("Loaded %d auction entries!", count);
+                statusColor = 0x00FF00;
+            } else {
+                statusMessage = "Failed to refresh. Check logs.";
+                statusColor = 0xFF0000;
+            }
+        });
     }
 
     private void calculateProfits() {
@@ -66,8 +161,37 @@ public class ProfitCalculatorScreen extends Screen {
             profitableItems = ProfitCalculator.getInstance().findProfitableItems(budget);
             scrollOffset = 0;
             selectedIndex = -1;
+
+            if (profitableItems.isEmpty()) {
+                statusMessage = "No profitable items found. Try refreshing auction data.";
+                statusColor = 0xFFFF00;
+            } else {
+                statusMessage = String.format("Found %d profitable items!", profitableItems.size());
+                statusColor = 0x00FF00;
+            }
         } catch (NumberFormatException e) {
             profitableItems = new ArrayList<>();
+            statusMessage = "Invalid budget amount!";
+            statusColor = 0xFF0000;
+        }
+    }
+
+    private void updateStatus() {
+        int totalItems = AuctionHouseManager.getInstance().getTotalItems();
+        String apiKey = ConfigManager.getInstance().getApiKey();
+        boolean hasKey = apiKey != null && !apiKey.isEmpty();
+
+        if (statusMessage.isEmpty()) {
+            if (!hasKey) {
+                statusMessage = "Set your API key to get started";
+                statusColor = 0xFFFF00;
+            } else if (totalItems == 0) {
+                statusMessage = "Click 'Refresh Auction Data' to load prices";
+                statusColor = 0xFFFF00;
+            } else {
+                statusMessage = String.format("Ready! %d items cached", totalItems);
+                statusColor = 0x00FF00;
+            }
         }
     }
 
@@ -84,34 +208,44 @@ public class ProfitCalculatorScreen extends Screen {
             0xFFFFFF
         );
 
+        // Draw API key label
+        context.drawTextWithShadow(
+            this.textRenderer,
+            "DonutSMP API Key:",
+            10,
+            15,
+            0xFFFFFF
+        );
+
         // Draw budget label
         context.drawTextWithShadow(
             this.textRenderer,
             "Budget:",
             this.width / 2 - 100,
-            10,
+            45,
             0xFFFFFF
+        );
+
+        // Draw status message
+        context.drawCenteredTextWithShadow(
+            this.textRenderer,
+            statusMessage,
+            this.width / 2,
+            this.height - 45,
+            statusColor
         );
 
         // Draw results
         if (!profitableItems.isEmpty()) {
             drawItemList(context, mouseX, mouseY);
             drawItemDetails(context);
-        } else {
-            context.drawCenteredTextWithShadow(
-                this.textRenderer,
-                "No profitable items found. Browse /ah to collect price data.",
-                this.width / 2,
-                this.height / 2,
-                0xAAAAAA
-            );
         }
     }
 
     private void drawItemList(DrawContext context, int mouseX, int mouseY) {
         int listX = 10;
-        int listY = 75;
-        int listHeight = this.height - 120;
+        int listY = 110;
+        int listHeight = this.height - 165;
 
         // Draw background
         context.fill(listX, listY, listX + LIST_WIDTH, listY + listHeight, 0x80000000);
@@ -119,7 +253,7 @@ public class ProfitCalculatorScreen extends Screen {
         // Draw header
         context.drawTextWithShadow(
             this.textRenderer,
-            "Profitable Items (sorted by margin)",
+            "Profitable Items (by margin)",
             listX + 5,
             listY - 12,
             0xFFFFFF
@@ -148,7 +282,11 @@ public class ProfitCalculatorScreen extends Screen {
 
             // Draw item name and profit
             String itemText = item.getItem().getName().getString();
-            String profitText = String.format("+$%.2f (%.0f%%)",
+            if (itemText.length() > 20) {
+                itemText = itemText.substring(0, 17) + "...";
+            }
+
+            String profitText = String.format("+$%.0f (%.0f%%)",
                 item.getProfit(), item.getProfitMargin());
 
             context.drawTextWithShadow(
@@ -177,8 +315,8 @@ public class ProfitCalculatorScreen extends Screen {
         ProfitCalculation item = profitableItems.get(selectedIndex);
 
         int detailX = this.width - DETAIL_WIDTH - 10;
-        int detailY = 75;
-        int detailHeight = this.height - 120;
+        int detailY = 110;
+        int detailHeight = this.height - 165;
 
         // Draw background
         context.fill(detailX, detailY, detailX + DETAIL_WIDTH, detailY + detailHeight, 0x80000000);
@@ -187,9 +325,10 @@ public class ProfitCalculatorScreen extends Screen {
         int lineHeight = 12;
 
         // Item name
+        String name = item.getItem().getName().getString();
         context.drawTextWithShadow(
             this.textRenderer,
-            item.getItem().getName().getString(),
+            name,
             detailX + 5,
             y,
             0xFFFF00
@@ -240,10 +379,16 @@ public class ProfitCalculatorScreen extends Screen {
         // Recipe ingredients
         for (RecipeIngredient ingredient : item.getRecipe().getIngredients()) {
             Double price = item.getMaterialPrices().get(ingredient.getItem());
-            String text = String.format("%dx %s @ $%.2f",
+            String ingredientName = ingredient.getItem().getName().getString();
+
+            // Truncate long names
+            if (ingredientName.length() > 20) {
+                ingredientName = ingredientName.substring(0, 17) + "...";
+            }
+
+            String text = String.format("%dx %s",
                 ingredient.getQuantity(),
-                ingredient.getItem().getName().getString(),
-                price != null ? price : 0);
+                ingredientName);
 
             context.drawTextWithShadow(
                 this.textRenderer,
@@ -251,6 +396,17 @@ public class ProfitCalculatorScreen extends Screen {
                 detailX + 10,
                 y,
                 0xCCCCCC
+            );
+            y += lineHeight;
+
+            // Price on next line if name is long
+            String priceText = String.format("  @ $%.2f ea", price != null ? price : 0);
+            context.drawTextWithShadow(
+                this.textRenderer,
+                priceText,
+                detailX + 10,
+                y,
+                0xAAAAAA
             );
             y += lineHeight;
         }
@@ -264,8 +420,8 @@ public class ProfitCalculatorScreen extends Screen {
 
         // Check if clicked on item list
         int listX = 10;
-        int listY = 75;
-        int listHeight = this.height - 120;
+        int listY = 110;
+        int listHeight = this.height - 165;
 
         if (mouseX >= listX && mouseX <= listX + LIST_WIDTH &&
             mouseY >= listY && mouseY <= listY + listHeight) {
