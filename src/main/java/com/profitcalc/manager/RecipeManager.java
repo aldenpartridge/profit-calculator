@@ -1,15 +1,14 @@
 package com.profitcalc.manager;
 
-import com.profitcalc.mixin.client.RecipeManagerAccessor;
 import com.profitcalc.model.CraftingRecipe;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.recipe.*;
-import net.minecraft.recipe.input.CraftingRecipeInput;
 import net.minecraft.registry.Registries;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Field;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,17 +24,20 @@ public class RecipeManager {
         return INSTANCE;
     }
 
+    @SuppressWarnings("unchecked")
     public void loadRecipes(net.minecraft.recipe.RecipeManager minecraftRecipeManager) {
         recipesByOutput.clear();
         int count = 0;
 
-        // Access recipes through our mixin accessor
+        // Access recipes through reflection
         try {
-            RecipeManagerAccessor accessor = (RecipeManagerAccessor) minecraftRecipeManager;
-            Map<RecipeType<?>, Map<?, RecipeEntry<?>>> allRecipes = accessor.getRecipes();
+            Field recipesField = net.minecraft.recipe.RecipeManager.class.getDeclaredField("recipes");
+            recipesField.setAccessible(true);
+            Map<RecipeType<?>, Map<?, RecipeEntry<?>>> allRecipes =
+                (Map<RecipeType<?>, Map<?, RecipeEntry<?>>>) recipesField.get(minecraftRecipeManager);
 
             // Load crafting recipes
-            Map<?, RecipeEntry<?>> craftingRecipes = allRecipes.get(net.minecraft.recipe.RecipeType.CRAFTING);
+            Map<?, RecipeEntry<?>> craftingRecipes = allRecipes.get(RecipeType.CRAFTING);
             if (craftingRecipes != null) {
                 for (RecipeEntry<?> entry : craftingRecipes.values()) {
                     if (entry.value() instanceof net.minecraft.recipe.CraftingRecipe craftingRecipe) {
@@ -50,7 +52,7 @@ public class RecipeManager {
             }
 
             // Load smelting recipes
-            Map<?, RecipeEntry<?>> smeltingRecipes = allRecipes.get(net.minecraft.recipe.RecipeType.SMELTING);
+            Map<?, RecipeEntry<?>> smeltingRecipes = allRecipes.get(RecipeType.SMELTING);
             if (smeltingRecipes != null) {
                 for (RecipeEntry<?> entry : smeltingRecipes.values()) {
                     if (entry.value() instanceof SmeltingRecipe smeltingRecipe) {
@@ -72,9 +74,9 @@ public class RecipeManager {
 
     private CraftingRecipe convertCraftingRecipe(net.minecraft.recipe.CraftingRecipe recipe) {
         try {
-            // Get recipe result using the result method
-            ItemStack output = recipe.getResult(null);
-            if (output.isEmpty()) {
+            // Get recipe result - use craft() method or result field
+            ItemStack output = recipe.craft(null, null);
+            if (output == null || output.isEmpty()) {
                 return null;
             }
 
@@ -84,12 +86,17 @@ public class RecipeManager {
             if (recipe instanceof ShapedRecipe shapedRecipe) {
                 Map<Item, Integer> ingredientCounts = new HashMap<>();
 
-                for (Ingredient ingredient : shapedRecipe.getIngredients()) {
-                    if (!ingredient.isEmpty()) {
-                        ItemStack[] stacks = ingredient.getMatchingStacks();
-                        if (stacks.length > 0) {
-                            Item item = stacks[0].getItem();
-                            ingredientCounts.merge(item, 1, Integer::sum);
+                // getIngredients() returns Optional<Ingredient> in 1.21.10
+                for (Optional<Ingredient> optionalIngredient : shapedRecipe.getIngredients()) {
+                    if (optionalIngredient.isPresent()) {
+                        Ingredient ingredient = optionalIngredient.get();
+                        if (!ingredient.isEmpty()) {
+                            // Get matching items - need to use getMatchingItems() or similar
+                            for (ItemStack stack : ingredient.getMatchingStacks()) {
+                                Item item = stack.getItem();
+                                ingredientCounts.merge(item, 1, Integer::sum);
+                                break; // Just use first matching item
+                            }
                         }
                     }
                 }
@@ -99,12 +106,13 @@ public class RecipeManager {
             } else if (recipe instanceof ShapelessRecipe shapelessRecipe) {
                 Map<Item, Integer> ingredientCounts = new HashMap<>();
 
-                for (Ingredient ingredient : shapelessRecipe.getIngredients()) {
+                // getInput() returns list of ingredients
+                for (Ingredient ingredient : shapelessRecipe.getInput()) {
                     if (!ingredient.isEmpty()) {
-                        ItemStack[] stacks = ingredient.getMatchingStacks();
-                        if (stacks.length > 0) {
-                            Item item = stacks[0].getItem();
+                        for (ItemStack stack : ingredient.getMatchingStacks()) {
+                            Item item = stack.getItem();
                             ingredientCounts.merge(item, 1, Integer::sum);
+                            break; // Just use first matching item
                         }
                     }
                 }
@@ -123,21 +131,19 @@ public class RecipeManager {
     private CraftingRecipe convertSmeltingRecipe(SmeltingRecipe recipe) {
         try {
             // Get recipe result
-            ItemStack output = recipe.getResult(null);
-            if (output.isEmpty()) {
+            ItemStack output = recipe.craft(null, null);
+            if (output == null || output.isEmpty()) {
                 return null;
             }
 
             CraftingRecipe customRecipe = new CraftingRecipe(output.getItem(), output.getCount());
 
-            // Get ingredient
-            if (!recipe.getIngredients().isEmpty()) {
-                Ingredient ingredient = recipe.getIngredients().get(0);
-                if (!ingredient.isEmpty()) {
-                    ItemStack[] stacks = ingredient.getMatchingStacks();
-                    if (stacks.length > 0) {
-                        customRecipe.addIngredient(stacks[0].getItem(), 1);
-                    }
+            // Get ingredient - getInput() returns the ingredient
+            Ingredient ingredient = recipe.getInput();
+            if (!ingredient.isEmpty()) {
+                for (ItemStack stack : ingredient.getMatchingStacks()) {
+                    customRecipe.addIngredient(stack.getItem(), 1);
+                    break; // Just use first matching item
                 }
             }
 
