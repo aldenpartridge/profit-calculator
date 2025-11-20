@@ -2,15 +2,10 @@
 	"schemaVersion": 1,
 	"id": "profit-calc",
 	"version": "${version}",
-	"name": "Profit Calc",
-	"description": "This is an example description! Tell everyone what your mod is about!",
-	"authors": [
-		"Me!"
-	],
-	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
-	},
+	"name": "Profit Calculator",
+	"description": "Calculate profit margins for crafting items by comparing auction house prices with material costs. Press P to open the calculator!",
+	"authors": [],
+	"contact": {},
 	"license": "CC0-1.0",
 	"icon": "assets/profit-calc/icon.png",
 	"environment": "*",
@@ -34,8 +29,5 @@
 		"minecraft": "~1.21.10",
 		"java": ">=21",
 		"fabric-api": "*"
-	},
-	"suggests": {
-		"another-mod": "*"
 	}
 }
