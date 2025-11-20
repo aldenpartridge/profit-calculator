@@ -412,12 +412,7 @@ public class ProfitCalculatorScreen extends Screen {
         }
     }
 
-    @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (super.mouseClicked(mouseX, mouseY, button)) {
-            return true;
-        }
-
         // Check if clicked on item list
         int listX = 10;
         int listY = 110;
