@@ -28,25 +28,34 @@ public class RecipeManager {
         recipesByOutput.clear();
         int count = 0;
 
-        for (RecipeEntry<?> entry : minecraftRecipeManager.values()) {
-            Recipe<?> recipe = entry.value();
+        // Load crafting recipes
+        for (RecipeEntry<net.minecraft.recipe.CraftingRecipe> entry :
+             minecraftRecipeManager.listAllOfType(net.minecraft.recipe.RecipeType.CRAFTING)) {
+            CraftingRecipe customRecipe = convertCraftingRecipe(entry.value());
+            if (customRecipe != null) {
+                Item output = customRecipe.getOutput();
+                recipesByOutput.computeIfAbsent(output, k -> new ArrayList<>()).add(customRecipe);
+                count++;
+            }
+        }
 
-            // Only process crafting and smelting recipes
-            if (recipe instanceof CraftingRecipe || recipe instanceof SmeltingRecipe) {
-                CraftingRecipe customRecipe = convertRecipe(recipe);
-                if (customRecipe != null) {
-                    Item output = customRecipe.getOutput();
-                    recipesByOutput.computeIfAbsent(output, k -> new ArrayList<>()).add(customRecipe);
-                    count++;
-                }
+        // Load smelting recipes
+        for (RecipeEntry<SmeltingRecipe> entry :
+             minecraftRecipeManager.listAllOfType(net.minecraft.recipe.RecipeType.SMELTING)) {
+            CraftingRecipe customRecipe = convertSmeltingRecipe(entry.value());
+            if (customRecipe != null) {
+                Item output = customRecipe.getOutput();
+                recipesByOutput.computeIfAbsent(output, k -> new ArrayList<>()).add(customRecipe);
+                count++;
             }
         }
 
         LOGGER.info("Loaded {} recipes", count);
     }
 
-    private CraftingRecipe convertRecipe(Recipe<?> recipe) {
+    private CraftingRecipe convertCraftingRecipe(net.minecraft.recipe.CraftingRecipe recipe) {
         try {
+            // Get recipe result using the result method
             ItemStack output = recipe.getResult(null);
             if (output.isEmpty()) {
                 return null;
@@ -54,7 +63,7 @@ public class RecipeManager {
 
             CraftingRecipe customRecipe = new CraftingRecipe(output.getItem(), output.getCount());
 
-            // Get ingredients based on recipe type
+            // Process ingredients
             if (recipe instanceof ShapedRecipe shapedRecipe) {
                 Map<Item, Integer> ingredientCounts = new HashMap<>();
 
@@ -84,9 +93,29 @@ public class RecipeManager {
                 }
 
                 ingredientCounts.forEach(customRecipe::addIngredient);
+            }
 
-            } else if (recipe instanceof SmeltingRecipe smeltingRecipe) {
-                Ingredient ingredient = smeltingRecipe.getIngredients().get(0);
+            return customRecipe;
+
+        } catch (Exception e) {
+            LOGGER.warn("Failed to convert crafting recipe: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private CraftingRecipe convertSmeltingRecipe(SmeltingRecipe recipe) {
+        try {
+            // Get recipe result
+            ItemStack output = recipe.getResult(null);
+            if (output.isEmpty()) {
+                return null;
+            }
+
+            CraftingRecipe customRecipe = new CraftingRecipe(output.getItem(), output.getCount());
+
+            // Get ingredient
+            if (!recipe.getIngredients().isEmpty()) {
+                Ingredient ingredient = recipe.getIngredients().get(0);
                 if (!ingredient.isEmpty()) {
                     ItemStack[] stacks = ingredient.getMatchingStacks();
                     if (stacks.length > 0) {
@@ -98,7 +127,7 @@ public class RecipeManager {
             return customRecipe;
 
         } catch (Exception e) {
-            LOGGER.warn("Failed to convert recipe: {}", e.getMessage());
+            LOGGER.warn("Failed to convert smelting recipe: {}", e.getMessage());
             return null;
         }
     }
